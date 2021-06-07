@@ -130,8 +130,8 @@ LEARNING_RATE = 0.001
 
 def main():
     game = SnakeGame(WIDTH, LENGTH, border=1)
-    training_gif = imageio.get_writer('training.gif', mode='I')
-    final_gif = imageio.get_writer('play.gif', mode='I')
+    training_gif = imageio.get_writer(PATH + 'training.gif', mode='I')
+    final_gif = imageio.get_writer(PATH + 'play.gif', mode='I')
 
     snake = snakeModel((WIDTH + BORDER, LENGTH + BORDER), len(ACTIONS), Adam(lr=LEARNING_RATE), Huber())
     snake_copy = snakeModel((WIDTH + BORDER, LENGTH + BORDER), len(ACTIONS), Adam(lr=LEARNING_RATE), Huber())
@@ -151,7 +151,7 @@ def main():
                 file_name = PATH + "/" + epoch + "_" + steps
                 plot_board(file_name, board)
                 training_gif.append_data(imageio.imread(file_name))
-                os.remove(file_name)
+                # os.remove(file_name)
 
             action = decide(snake, board, epsilon)
             next_board, reward, done, info = game.step(action)
