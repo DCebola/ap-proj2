@@ -103,8 +103,8 @@ def train(replay_memory, model, target_model):
     model.fit(np.array(x), np.array(y), batch_size=BATCH_SIZE, verbose=0, shuffle=True)
 
 
-def generateGame(scenario):
-    return SnakeGame(WIDTH, HEIGHT, border=BORDER,
+def generateGame(scenario, width=30, height=30, border=1):
+    return SnakeGame(width, height, border=border,
                      food_amount=scenario.get('FOOD_AMOUNT'),
                      max_grass=scenario.get('MAX_GRASS'),
                      grass_growth=scenario.get('GRASS_GROWTH'))
@@ -114,8 +114,8 @@ RANDOM_SEED = 5
 tf.random.set_seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 
-PATH = "logs/" + datetime.datetime.now().strftime("%Y_%m_%d-%H:%M:%S")
-
+PATH = "logs/"
+TRAIN_BORDER = 8
 BORDER = 1
 WIDTH = 30
 HEIGHT = 30
@@ -125,11 +125,11 @@ POLICY = [-1, 0, 1]
 
 BATCH_SIZE = 64 * 2
 MEMORY_LENGTH = 50000
-EPOCHS = 300
-MIN_EPOCHS = 1000
+EPOCHS = 150
+MIN_EPOCHS = 500
 MAX_STEPS = 300
 TRAIN_STEPS = 4
-TARGET_DELAY = 100
+TARGET_DELAY = 50
 
 # TODO: experiment with different values for different heuristics
 MAX_EPSILON = 1
@@ -139,12 +139,10 @@ DISCOUNT = 0.618
 LEARNING_RATE = 0.001
 
 if __name__ == '__main__':
-    os.makedirs(PATH)
-    train_scenarios = [{'FOOD_AMOUNT': 10, 'MAX_GRASS': 0.05, 'GRASS_GROWTH': 0.001},
-                       {'FOOD_AMOUNT': 7, 'MAX_GRASS': 0.03, 'GRASS_GROWTH': 0.0005},
-                       {'FOOD_AMOUNT': 5, 'MAX_GRASS': 0.02, 'GRASS_GROWTH': 0.0003},
-                       {'FOOD_AMOUNT': 3, 'MAX_GRASS': 0.01, 'GRASS_GROWTH': 0.0001},
-                       {'FOOD_AMOUNT': 1, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0}]
+    train_scenarios = [{'FOOD_AMOUNT': 5, 'MAX_GRASS': 0.05, 'GRASS_GROWTH': 0.0001},
+                       {'FOOD_AMOUNT': 15, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0},
+                       {'FOOD_AMOUNT': 5, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0}]
+
     eval_scenario = {'FOOD_AMOUNT': 1, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0}
 
     training_gif = imageio.get_writer(PATH + "/" + 'training.gif', mode='I')
@@ -153,18 +151,25 @@ if __name__ == '__main__':
     target_snake = snakeModel(BOARD_SHAPE, len(POLICY), Adam(lr=LEARNING_RATE), Huber())
     target_snake.set_weights(snake.get_weights())
     memory = deque(maxlen=MEMORY_LENGTH)
+    # TODO: Fill memory (Pickle?)
 
     epsilon = MAX_EPSILON
     game = None
-    epochs_per_train_scenario = EPOCHS / len(train_scenarios)
-    scenario = 0
     steps = 0
     train_rewards = []
     eval_rewards = []
+
+    train_border = TRAIN_BORDER
+    train_width = 32 - 2*TRAIN_BORDER
+    train_height = 32 - 2*TRAIN_BORDER
+    border_inc_interval = round(EPOCHS / (train_border - 1))
+
     for epoch in tqdm(range(EPOCHS), desc="Training"):
-        if epoch % epochs_per_train_scenario == 0:
-            game = generateGame(train_scenarios[scenario])
-            scenario += 1
+        if epoch % border_inc_interval == 0 and epoch > 0:
+            train_border -= 1
+            train_height += 2
+            train_width += 2
+        game = generateGame(train_scenarios[epoch % len(train_scenarios)], train_width, train_height, train_border)
         board, reward, _, info = game.reset()
         total_reward = 0
         done = False
@@ -184,42 +189,38 @@ if __name__ == '__main__':
 
             board = next_board
             total_reward += reward
-            if steps == MAX_STEPS:
-                done = True
             if done:
-               # print('Train Reward: total = {}, final = {}'.format(total_reward, reward))
                 file_name = PATH + "/" + str(epoch) + "_" + str(steps) + ".png"
                 plot_board(file_name, board, str(epoch) + ", " + str(steps))
                 training_gif.append_data(imageio.imread(file_name))
                 training_gif.append_data(imageio.imread(file_name))
                 os.remove(file_name)
                 train_rewards.append(total_reward)
-            if steps >= TARGET_DELAY:
-                #print('Copying snake network weights to snake copy.')
-                target_snake.set_weights(snake.get_weights())
-                steps = 0
-                # break
+                if steps >= TARGET_DELAY:
+                    target_snake.set_weights(snake.get_weights())
+                    steps = 0
         total_reward = 0
         done = False
         eval_game = generateGame(eval_scenario)
         board, reward, _, info = eval_game.reset()
-        while not done:
-            if epoch + 1 == EPOCHS:
-                file_name = PATH + "/" + str(epoch) + "_" + str(steps) + ".png"
-                plot_board(file_name, board, str(epoch) + ", " + str(steps))
-                final_gif.append_data(imageio.imread(file_name))
-                os.remove(file_name)
-            action = decide(snake, board, epsilon)
-            board, reward, done, info = eval_game.step(action)
-            total_reward += reward
-            if done:
-                #print('Eval Reward: total = {}, final = {}'.format(total_reward, reward))
+        if epoch % 20:
+            while not done:
                 if epoch + 1 == EPOCHS:
                     file_name = PATH + "/" + str(epoch) + "_" + str(steps) + ".png"
                     plot_board(file_name, board, str(epoch) + ", " + str(steps))
                     final_gif.append_data(imageio.imread(file_name))
-                    final_gif.append_data(imageio.imread(file_name))
                     os.remove(file_name)
-                eval_rewards.append(total_reward)
+                action = decide(snake, board, epsilon)
+                board, reward, done, info = eval_game.step(action)
+                total_reward += reward
+                if done:
+                    # print('Eval Reward: total = {}, final = {}'.format(total_reward, reward))
+                    if epoch + 1 == EPOCHS:
+                        file_name = PATH + "/" + str(epoch) + "_" + str(steps) + ".png"
+                        plot_board(file_name, board, str(epoch) + ", " + str(steps))
+                        final_gif.append_data(imageio.imread(file_name))
+                        final_gif.append_data(imageio.imread(file_name))
+                        os.remove(file_name)
+                    eval_rewards.append(total_reward)
         epsilon = MIN_EPSILON + (MAX_EPSILON - MIN_EPSILON) * np.exp(-DECAY_RATE * epoch)
     plot_rewards(PATH, 'Rewards.png', train_rewards, eval_rewards)
