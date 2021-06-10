@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Input, Dense, Flatten, Conv2D, MaxPooling2D, BatchNormalization, Dropout
+from tensorflow.keras.layers import Input, Dense, Flatten, Conv2D, MaxPooling2D, Lambda
 from tensorflow.keras.losses import Huber
 from tensorflow.keras.initializers import HeUniform
 from tensorflow.keras.optimizers import Adam
@@ -73,6 +73,7 @@ def snakeModel(state_shape, action_shape, optimizer, loss, cnn=False):
     layer = Dense(128, input_shape=state_shape, activation='relu', kernel_initializer=init)(layer)
     layer = Dense(64, activation='relu', kernel_initializer=init)(layer)
     outputs = Dense(action_shape, activation='softmax', kernel_initializer=init)(layer)
+
     model = Model(inputs=inputs, outputs=outputs)
     model.compile(loss=loss, optimizer=optimizer, metrics=['accuracy'])
     return model
@@ -82,7 +83,7 @@ def decide(agent, state, _epsilon):
     if np.random.rand() <= _epsilon:
         return np.random.choice(POLICY, 1)
     predicted = agent.predict(state.reshape(BATCHED_SHAPE)).flatten()
-    return np.argmax(predicted) - 1
+    return POLICY[np.argmax(predicted)]
 
 
 def train(replay_memory, model, target_model):
@@ -300,16 +301,14 @@ def heuristic(_, apples, head, tails, direction, _type):
 
 def generateMemory(length, scenarios):
     mem = deque(maxlen=length)
-    memory_loaded = False
-    if os.path.isfile(os.getcwd() + "/" + "memory.pkl"):
-        with open(os.getcwd() + "/" + "memory.pkl") as f:
+    if os.path.isfile("memory.pkl"):
+        with open(os.getcwd() + "/" + "memory.pkl", "rb") as f:
             try:
                 print("Loaded memory.")
-                memory_loaded = True
                 mem = pickle.load(f)
             except Exception:
                 pass
-    if memory_loaded is False:
+    else:
         print("Generating memory with examples.")
         mem_apples = []
         mem_steps = []
@@ -376,9 +375,25 @@ def generateMemory(length, scenarios):
     return mem
 
 
-RANDOM_SEED = 5
-tf.random.set_seed(RANDOM_SEED)
-np.random.seed(RANDOM_SEED)
+def generateProximityRewards(_board, _apples):
+    odor_map = np.zeros((_board.shape[0], _board.shape[1]))
+    for apple in _apples:
+        _i = 0
+        _j = 0
+        for n in range(PROXIMITY_AREA_L, 0, -1):
+            for i in range(_i, n):
+                for j in range(_j, n):
+                    x = apple[0] - round(n / 2) + i
+                    y = apple[1] - round(n / 2) + j
+                    try:
+                        odor_map[x, y] += INITIAL_PROXIMITY_REWARD_BONUS
+                    except Exception:
+                        continue
+            _i += 1
+            _j += 1
+        odor_map[apple[0], apple[1]] = INITIAL_APPLE_BONUS
+    return odor_map
+
 
 RANDOM_SEED = 5
 tf.random.set_seed(RANDOM_SEED)
@@ -394,17 +409,22 @@ BATCHED_SHAPE = (1, WIDTH + 2 * BORDER, HEIGHT + 2 * BORDER, 3)
 POLICY = [-1, 0, 1]
 
 BATCH_SIZE = 64 * 2
-MEMORY_LENGTH = 100000
+MEMORY_LENGTH = 50000
 MIN_EPOCHS = 1000
 EPOCHS = 100
-MAX_STEPS = 1000
+MAX_STEPS = 500
 
 # TODO: experiment with different values for different heuristics
 MAX_EPSILON = 1
 MIN_EPSILON = 0.01
 DECAY_RATE = 0.01
 
-DISCOUNT = 0.99  # 0.618
+INITIAL_APPLE_BONUS = 10
+INITIAL_PROXIMITY_REWARD_BONUS = 3
+PROXIMITY_AREA_L = 5
+BONUS_DECAY = 0.05
+
+DISCOUNT = 0.99
 LEARNING_RATE = 0.001
 TARGET_DELAY = 100
 TRAIN_STEPS = 4
@@ -412,19 +432,24 @@ TRAIN_STEPS = 4
 RANDOM_PATTERN = 0
 L_PATTERN = 1
 DIAGONAL_PATTERN = 2
+GENERATE_GIF = True
 
 if __name__ == '__main__':
+    tf.keras.backend.clear_session()
     os.makedirs(PATH, exist_ok=True)
-    training_gif = imageio.get_writer(PATH + "/" + 'training.gif', mode='I')
+    if GENERATE_GIF:
+        training_gif = imageio.get_writer(PATH + "/" + 'training.gif', mode='I')
 
-    train_scenarios = [{'FOOD_AMOUNT': 15, 'MAX_GRASS': 0.2, 'GRASS_GROWTH': 0.001},
-                       {'FOOD_AMOUNT': 10, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0},
-                       {'FOOD_AMOUNT': 5, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0},
+    train_scenarios = [{'FOOD_AMOUNT': 3, 'MAX_GRASS': 0.2, 'GRASS_GROWTH': 0.001},
+                       {'FOOD_AMOUNT': 3, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0},
                        {'FOOD_AMOUNT': 1, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0}]
 
     eval_scenario = {'FOOD_AMOUNT': 1, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0}
 
-    memory = generateMemory(MEMORY_LENGTH, [{'FOOD_AMOUNT': 1, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0}])
+    memory = generateMemory(MEMORY_LENGTH,
+                            [{'FOOD_AMOUNT': 3, 'MAX_GRASS': 0.2, 'GRASS_GROWTH': 0.001},
+                             {'FOOD_AMOUNT': 3, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0},
+                             {'FOOD_AMOUNT': 1, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0}])
 
     snake = snakeModel(BOARD_SHAPE, len(POLICY), Adam(lr=LEARNING_RATE), Huber(), cnn=True)
     target_snake = snakeModel(BOARD_SHAPE, len(POLICY), Adam(lr=LEARNING_RATE), Huber(), cnn=True)
@@ -441,49 +466,55 @@ if __name__ == '__main__':
     train_width = 32 - 2 * TRAIN_BORDER
     train_height = 32 - 2 * TRAIN_BORDER
     border_inc_interval = round(EPOCHS / (train_border - 1))
-    scenario = 0
+    max_apples = 0
     for epoch in tqdm(range(EPOCHS), desc="Training"):
         if epoch % border_inc_interval == 0 and epoch > 0:
             train_border -= 1
             train_height += 2
             train_width += 2
-        if epoch == round(EPOCHS / 4):
-            scenario = 1
-        elif epoch == round(2 * EPOCHS / 4):
-            scenario = 2
-        elif epoch == round(3 * EPOCHS / 4):
-            scenario = 3
-        game = generateGame(train_scenarios[scenario])
-
-        board, reward, _, info = game.reset()
+        # game = generateGame(train_scenarios[epoch % len(train_scenarios)], train_width, train_height, train_border)
+        game = generateGame(train_scenarios[epoch % len(train_scenarios)])
+        _, apples, _, _, _ = game.get_state()
+        board, _, _, _ = game.reset()
+        proximity_bonus_grid = generateProximityRewards(board, apples)
         total_apples = 0
         total_steps = 0
         total_rewards = 0
+        reward = 0
         done = False
         while not done:
-
-            if not done:
+            if GENERATE_GIF:
                 file_name = PATH + "/" + str(epoch) + "_" + str(total_steps) + ".png"
                 plot_board(file_name, board, str(epoch) + ", " + str(total_steps))
                 training_gif.append_data(imageio.imread(file_name))
                 os.remove(file_name)
 
+            total_rewards += reward
             steps += 1
             total_steps += 1
             action = decide(snake, board, epsilon)
             next_board, reward, done, info = game.step(action)
+            _, apples, head, _, _ = game.get_state()
+            if reward >= 1:
+                proximity_bonus_grid = generateProximityRewards(board, apples)
+                total_apples += 1
+                if total_apples > max_apples:
+                    max_apples = total_apples + 1
+
+            reward += proximity_bonus_grid[head]
             memory.append([board, action, reward, next_board, done])
-            total_rewards += reward
             if len(memory) >= MIN_EPOCHS and (steps % TRAIN_STEPS == 0 or done):
                 train(memory, snake, target_snake)
-            if reward >= 1:
-                total_apples += 1
+
             board = next_board
             if done:
                 train_apples.append(total_apples)
                 train_steps.append(total_steps)
                 train_rewards.append(total_rewards)
                 total_steps = 0
+                if total_apples >= max_apples:
+                    INITIAL_APPLE_BONUS -= INITIAL_APPLE_BONUS * BONUS_DECAY
+                    INITIAL_PROXIMITY_REWARD_BONUS -= INITIAL_PROXIMITY_REWARD_BONUS * BONUS_DECAY
                 if steps >= TARGET_DELAY:
                     target_snake.set_weights(snake.get_weights())
                     steps = 0
