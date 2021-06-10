@@ -19,23 +19,69 @@ PERGUNTAS/QUESTIONS:
 
 Q1: Explain and justify the architecture of your agent, describing the network, input and output, and what experiments you did to choose this particular architecture.
 Q1; Explique e justifique a arquitectura do seu agente, descrevendo a rede, os valores de entrada e saída e que experiências fez para escolher esta rede em particular.
-R1:
+R1: O nosso modelo é composto por 3 blocos de 2 Convolution2D Layers, com kernel 3x3 e função de ativação ReLU, sendo que os primeiros dois destes blocos terminam com uma Layer de MaxPooking2D, com poolSize de 2x2, e o terceiro com uma Layer de Flatten. O número de filtros de cada Convolution2D Layer vai aumentando segundo a profundidade desta (32, 64, 128).
+A seguir a este segmento com blocos de Convolution2D Layers, temos 3 Dense Layers com dimensões 128, 64 e 3 unidades, sendo que as duas primeiras usam ativação ReLU e a última ativação Softmax.
+O input deste modelo são os Boards (imagens RGB de dimensões 32x32x3) e o output é um array de dimensão 3 com as probabilidades do Board estar associado a uma das 3 classes (ações que a cobra pode realizar, a "policy" do agente).
+Para escolher esta arquitetura, treinámos 2 agentes. Um deles apenas constituído pelas Dense Layers e o outro com a arquitetura completa (descrita em cima). O treino foi executado durante 100 epochs, com os mesmos parâmetros, em ambos os casos. O que se verificou foi que com o agente com a arquitetura completa acabava por sobreviver durante mais tempo (mais steps dados) e comia mais maçãs. Este resultado era o esperado pois os inputs são imagens, adequando-se o uso das Convolution2D Layers. O agente escolhido foi o que usa a arquitetura completa.
+
+/logs/Train_With_CNN.png
+/logs/Train_Without_CNN.png
+
 
 
 Q2: Describe the scenario for which you tried to optimize your agent, justifying your choice and describing the experiments you did to select this scenario.
 Q2: Descreva o cenário para o qual tentou optimizar o seu agente, justificando a sua escolha e descrevendo que experiências fez para seleccionar este cenário.
-R2:
+R2: Procuramos otimizar o nosso agente para lidar com Boards de 32x32 (border de 1) com 1 maçã em jogo a cada momento. Escolheu-se este cenário por ser o mais usual num jogo de Snake e por ser o cenário mais desafiante para o agente, por não ter incentivos à exploração, o número de maçãs ser mínima e a área do Board ser extensa.
 
 
 Q3: Explain how you generate the experiences for training your agent. Do not forget to explain the details like the balance between exploitation and exploration, how experiences are selected, what information you store in each experience, how large is the pool of experiences and how frequently are new experiences generated. Justify your choices.
 Q3: Explique como gerou as experiências para treinar seu agente. Não se esqueça de explicar os detalhes como o equilíbrio entre exploração aleatória e guiada (exploration e exploitation), como as experiências são selecionadas, que informação guarda em cada experiência, quão grande é o conjunto de experiências e com que frequência novas experiências são geradas. Justifique estas escolhas.
-R3:
+R3: A memória do agente (capacidade de 100.000 experiências) é pré-preenchida com exemplos gerados segundo 3 heurísticas: uma heurística aleatória; uma heuristica eager search com padrão de procura em diagonal pela maçã mais próxima; uma heuristica eager search com padrão de procura em L (procura maçã por linha e depois por coluna).
+A heurística aleatória foi usada para criar diversidade na memória do agente, as outras duas serviram para introduzir dois tipos de movimentos eficientes na procura de maçãs.
+O repartição destas 3 heurísticas na memória é 1/5 para a heurística aleatória, e 2/5 para cada uma das outras.
+Dos jogos usados para criar exemplos, foram registadas em memória diferentes situações consideradas "interessantes", como comer uma maçã ou morrer, assim como situações "normais", como movimentação sem morrer. O rácio entre estas situações manteve-se perto dos 50/50. 
+A partir do começo do treino, apenas o agente preenche a memória com as observações que faz a cada ação (output da função game.step(...)).
 
 
 Q4: Explain how you trained your agent: the algorithm used, the discount factor (gamma), the schedule for generating new experiences and training the agent and other techniques. Justify your choices and explain what experiments you did and which alternatives you tried.
 Q4: Explique como treinou o seu agente: o algoritmo utilizado, o factor de desconto (gama), a coordenação da geração de novas experiências e treinao do agente, e outras técnicas que tenha usado. Justifique suas escolhas e explique que alternativas testou e como validou experimentalmente estas escolhas.
-R4:
+R4: A cada época, o agente joga um jogo. Cada ação executada pelo agente pode resultar de uma decisão sua ou ser uma ação aleatória. A execução de uma ação aleatória depende de um factor Epsilon (com valor entre 0.01 e 0.6), que vai diminuindo após cada época (com taxa de decaimento de 0.01). 
+O agente treina a cada 4 steps e os pesos do "target agent" são atualizados a cada 100 steps. Isto é feito para diminuir a volatilidade dos pesos no agente principal, que são influenciados por ações recentes de grande frequência. O target agent vai sendo construído com base em pesos mais estabilizados, com frequência mais baixa.
+O factor de desconto utilizado foi de 0.6. Experimentámos com valores mais elevados (como 0.99), para testar se um agente mais eager por resultados elevados e rápidos se comportaria melhor que um mais "paciente". Testámos isto com treinos de 100 epochs e reparámos que na realidade o agente que sobrevive durante mais tempo acaba por comer mais maçãs. Dado isto, acabámos por selecionar o primeiro valor mencionado.
+Para treinar este agente, alternámos entre 3 cenários: 3 maçãs e relva; 3 maçãs e sem relva; 1 maçã e sem relva. O uso da relva com mais maçãs serviu para incentivar o agente a explorar num Board mais favorável a encontrar maçãs. Os outros cenários representam níveis de dificuldades mais elevados, sem relva e menos maçãs. 
+Para além do uso de diferentes cenários, testámos também diferentes valores para a border, começando com valor 8 e diminuindo até 1, ao longo das épocas. Este último caso de border, é o caso para o qual estamos a apontar, daí ser gerado nas últimas epochs. 
+A variação de cenários e border serviram para treinar o agente com um número de casos mais diversificado, para que este aprendesse primeiro em cenários mais fáceis, em preparação para o cenário mais complicado. 
+
+/logs/Train_With_0.6.png
+/logs/Train_With_0.99.png
+
 
 Q5: Discuss this problem and your solution, describing the agent's performance (score, survival, etc.), which aspects of the game were most difficult for the agent to learn, how you tried to remedy these difficulties and what ideas you might have tried if you had more time.
 Q5: Discuta este problema e a sua solução, descrevendo o desempenho do agente (pontuação, sobrevivência, etc), que aspectos do jogo foram mais difíceis de aprender para o agente, como tentou colmatar essas dificuldades e que ideias ficaram que poderia experimentar se tivesse mais tempo.
-R5:
+R5: Este é um problema típico de Deep Reinforcement Learning, onde um agente extrai features de um observações do estado resultante de uma ação, e vai aprendendo com delay, recorrendo a um target agent. Neste tipo de problemas, aproximam-se os valores de Q-values (valores das ações associadas a um dado estado) com recurso aos agentes (redes neuronais).
+Neste caso particular, o maior problema foi a necesidade de treinar o agente com dois objetivos: não morrer e comer maçãs (dado que para comer maçãs, necessita de não morrer).
+Inicialmente, o uso de relva para incentivar a exploração foi interessante, no entanto o agente não associava causalidade entre comer maçãs e explorar, sendo que comia maçãs por acaso por acaso, sendo que estavam no seu caminho. Isto pode ser viável com mais epochs de treino, no entanto, com 1.000, ainda não se observavam alterações a este comportamento.
+Consequentemente, tentámos introduzir a noção de recompensa bónus por proximidade a maçãs. Com 1.000 epochs de treino, curiosamente, este mecanismo também não aumentou a frequência com que o agente come maçãs, aumentando no entanto bastante a sua sobrevivência. Isto pode explicar-se pelo facto do reward de proximidade não ser apagado após o agente se deslocar a uma dada célula, incentivando a que contornasse as maçãs ao invés de as comer.
+Se tivessemos mais tempo, iriamos tentar corrigir este problema e talvez explorar a noção de o agente ter uma noção de "fome" (necessidade de comer após n steps, senão morre).
+
+/logs/Train_With_Proximity_1000.png
+/logs/Train_Without_Proximity_1000.png
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
