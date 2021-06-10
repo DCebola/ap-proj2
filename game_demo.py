@@ -60,10 +60,6 @@ def CNNModel(inputs):
     layer = MaxPooling2D(pool_size=(2, 2), padding='same')(layer)
     layer = Conv2D(128, kernel_size=(3, 3), activation="relu", padding='same')(layer)
     layer = Conv2D(128, kernel_size=(3, 3), activation="relu", padding='same')(layer)
-    layer = Flatten()(layer)
-    layer = Dense(128, activation='relu')(layer)
-    layer = BatchNormalization()(layer)
-    layer = Dropout(0.5)(layer)
     return layer
 
 
@@ -73,10 +69,9 @@ def snakeModel(state_shape, action_shape, optimizer, loss, cnn=False):
     layer = inputs
     if cnn:
         layer = CNNModel(inputs)
-    else:
-        layer = Flatten()(layer)
-    layer = Dense(64, input_shape=state_shape, activation='relu', kernel_initializer=init)(layer)
-    layer = Dense(32, activation='relu', kernel_initializer=init)(layer)
+    layer = Flatten()(layer)
+    layer = Dense(128, input_shape=state_shape, activation='relu', kernel_initializer=init)(layer)
+    layer = Dense(64, activation='relu', kernel_initializer=init)(layer)
     outputs = Dense(action_shape, activation='softmax', kernel_initializer=init)(layer)
     model = Model(inputs=inputs, outputs=outputs)
     model.compile(loss=loss, optimizer=optimizer, metrics=['accuracy'])
@@ -363,7 +358,7 @@ def generateMemory(length, scenarios):
                 step = step + 1
                 if example_count == round(length / 5):
                     heuristic_type = L_PATTERN
-                elif example_count == round(3 * length / 5):
+                elif example_count == round(2 * length / 5):
                     heuristic_type = DIAGONAL_PATTERN
                 if example_count == length:
                     not_filled = False
@@ -399,21 +394,20 @@ BATCHED_SHAPE = (1, WIDTH + 2 * BORDER, HEIGHT + 2 * BORDER, 3)
 POLICY = [-1, 0, 1]
 
 BATCH_SIZE = 64 * 2
-MEMORY_LENGTH = 50000
+MEMORY_LENGTH = 100000
 MIN_EPOCHS = 1000
 EPOCHS = 100
-MAX_STEPS = 500
+MAX_STEPS = 1000
 
 # TODO: experiment with different values for different heuristics
 MAX_EPSILON = 1
 MIN_EPSILON = 0.01
 DECAY_RATE = 0.01
 
-DISCOUNT = 0.618
+DISCOUNT = 0.99  # 0.618
 LEARNING_RATE = 0.001
 TARGET_DELAY = 100
 TRAIN_STEPS = 4
-
 
 RANDOM_PATTERN = 0
 L_PATTERN = 1
@@ -421,9 +415,10 @@ DIAGONAL_PATTERN = 2
 
 if __name__ == '__main__':
     os.makedirs(PATH, exist_ok=True)
-    #training_gif = imageio.get_writer(PATH + "/" + 'training.gif', mode='I')
+    training_gif = imageio.get_writer(PATH + "/" + 'training.gif', mode='I')
 
-    train_scenarios = [{'FOOD_AMOUNT': 1, 'MAX_GRASS': 0.2, 'GRASS_GROWTH': 0.0001},
+    train_scenarios = [{'FOOD_AMOUNT': 15, 'MAX_GRASS': 0.2, 'GRASS_GROWTH': 0.001},
+                       {'FOOD_AMOUNT': 10, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0},
                        {'FOOD_AMOUNT': 5, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0},
                        {'FOOD_AMOUNT': 1, 'MAX_GRASS': 0, 'GRASS_GROWTH': 0}]
 
@@ -446,16 +441,19 @@ if __name__ == '__main__':
     train_width = 32 - 2 * TRAIN_BORDER
     train_height = 32 - 2 * TRAIN_BORDER
     border_inc_interval = round(EPOCHS / (train_border - 1))
-
+    scenario = 0
     for epoch in tqdm(range(EPOCHS), desc="Training"):
         if epoch % border_inc_interval == 0 and epoch > 0:
             train_border -= 1
             train_height += 2
             train_width += 2
-        game = generateGame(train_scenarios[epoch % len(train_scenarios)], train_width, train_height, train_border)
-        # game = generateGame(train_scenarios[epoch % len(train_scenarios)])
-        # game = generateGame(train_scenarios[epoch % 2], train_width, train_height, train_border)
-        # game = generateGame(eval_scenario, train_width, train_height, train_border)
+        if epoch == round(EPOCHS / 4):
+            scenario = 1
+        elif epoch == round(2 * EPOCHS / 4):
+            scenario = 2
+        elif epoch == round(3 * EPOCHS / 4):
+            scenario = 3
+        game = generateGame(train_scenarios[scenario])
 
         board, reward, _, info = game.reset()
         total_apples = 0
@@ -463,13 +461,13 @@ if __name__ == '__main__':
         total_rewards = 0
         done = False
         while not done:
-            """
+
             if not done:
-                file_name = PATH + "/" + str(epoch) + "_" + str(steps) + ".png"
-                plot_board(file_name, board, str(epoch) + ", " + str(steps))
+                file_name = PATH + "/" + str(epoch) + "_" + str(total_steps) + ".png"
+                plot_board(file_name, board, str(epoch) + ", " + str(total_steps))
                 training_gif.append_data(imageio.imread(file_name))
                 os.remove(file_name)
-            """
+
             steps += 1
             total_steps += 1
             action = decide(snake, board, epsilon)
@@ -482,13 +480,6 @@ if __name__ == '__main__':
                 total_apples += 1
             board = next_board
             if done:
-                """
-                file_name = PATH + "/" + str(epoch) + "_" + str(steps) + ".png"
-                plot_board(file_name, board, str(epoch) + ", " + str(steps))
-                training_gif.append_data(imageio.imread(file_name))
-                training_gif.append_data(imageio.imread(file_name))
-                os.remove(file_name)
-                """
                 train_apples.append(total_apples)
                 train_steps.append(total_steps)
                 train_rewards.append(total_rewards)
