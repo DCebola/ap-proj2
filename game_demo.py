@@ -395,7 +395,7 @@ def generateProximityRewards(_board, _apples):
     return odor_map
 
 
-RANDOM_SEED = 5
+RANDOM_SEED = 10
 tf.random.set_seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 
@@ -409,22 +409,21 @@ BATCHED_SHAPE = (1, WIDTH + 2 * BORDER, HEIGHT + 2 * BORDER, 3)
 POLICY = [-1, 0, 1]
 
 BATCH_SIZE = 64 * 2
-MEMORY_LENGTH = 50000
+MEMORY_LENGTH = 100000
 MIN_EPOCHS = 1000
-EPOCHS = 100
+EPOCHS = 1000
 MAX_STEPS = 500
-
-# TODO: experiment with different values for different heuristics
-MAX_EPSILON = 1
+MAX_EPSILON = 0.6
 MIN_EPSILON = 0.01
 DECAY_RATE = 0.01
 
+ADD_BONUS = True
 INITIAL_APPLE_BONUS = 10
-INITIAL_PROXIMITY_REWARD_BONUS = 3
+INITIAL_PROXIMITY_REWARD_BONUS = 1
 PROXIMITY_AREA_L = 5
 BONUS_DECAY = 0.05
 
-DISCOUNT = 0.99
+DISCOUNT = 0.6
 LEARNING_RATE = 0.001
 TARGET_DELAY = 100
 TRAIN_STEPS = 4
@@ -432,7 +431,7 @@ TRAIN_STEPS = 4
 RANDOM_PATTERN = 0
 L_PATTERN = 1
 DIAGONAL_PATTERN = 2
-GENERATE_GIF = True
+GENERATE_GIF = False
 
 if __name__ == '__main__':
     tf.keras.backend.clear_session()
@@ -472,11 +471,11 @@ if __name__ == '__main__':
             train_border -= 1
             train_height += 2
             train_width += 2
-        # game = generateGame(train_scenarios[epoch % len(train_scenarios)], train_width, train_height, train_border)
-        game = generateGame(train_scenarios[epoch % len(train_scenarios)])
-        _, apples, _, _, _ = game.get_state()
+        game = generateGame(train_scenarios[epoch % len(train_scenarios)], train_width, train_height, train_border)
         board, _, _, _ = game.reset()
-        proximity_bonus_grid = generateProximityRewards(board, apples)
+        if ADD_BONUS:
+            _, apples, _, _, _ = game.get_state()
+            proximity_bonus_grid = generateProximityRewards(board, apples)
         total_apples = 0
         total_steps = 0
         total_rewards = 0
@@ -494,14 +493,17 @@ if __name__ == '__main__':
             total_steps += 1
             action = decide(snake, board, epsilon)
             next_board, reward, done, info = game.step(action)
-            _, apples, head, _, _ = game.get_state()
+            if ADD_BONUS:
+                _, apples, head, _, _ = game.get_state()
             if reward >= 1:
-                proximity_bonus_grid = generateProximityRewards(board, apples)
+                if ADD_BONUS:
+                    proximity_bonus_grid = generateProximityRewards(board, apples)
                 total_apples += 1
                 if total_apples > max_apples:
                     max_apples = total_apples + 1
 
-            reward += proximity_bonus_grid[head]
+            if ADD_BONUS:
+                reward += proximity_bonus_grid[head]
             memory.append([board, action, reward, next_board, done])
             if len(memory) >= MIN_EPOCHS and (steps % TRAIN_STEPS == 0 or done):
                 train(memory, snake, target_snake)
@@ -512,11 +514,11 @@ if __name__ == '__main__':
                 train_steps.append(total_steps)
                 train_rewards.append(total_rewards)
                 total_steps = 0
-                if total_apples >= max_apples:
+                if total_apples >= max_apples and ADD_BONUS:
                     INITIAL_APPLE_BONUS -= INITIAL_APPLE_BONUS * BONUS_DECAY
                     INITIAL_PROXIMITY_REWARD_BONUS -= INITIAL_PROXIMITY_REWARD_BONUS * BONUS_DECAY
                 if steps >= TARGET_DELAY:
                     target_snake.set_weights(snake.get_weights())
                     steps = 0
         epsilon = MIN_EPSILON + (MAX_EPSILON - MIN_EPSILON) * np.exp(-DECAY_RATE * epoch)
-    plot_apples_steps(PATH, 'Train.png', train_rewards, train_apples, train_steps)
+plot_apples_steps(PATH, 'Train.png', train_rewards, train_apples, train_steps)
